@@ -25,6 +25,8 @@
 	let limitUnder100 = $state(true); // 기본값 true로 설정
 	let isPaused = $state(false);
 	let isTransitioning = $state(false); // 다음 단계로 넘어가는 중인지 여부
+	let selectedCharacter = $state<'avata1' | 'avata2' | 'avata3' | 'custom'>('avata1');
+	let customCharacterImage = $state<string | null>(null);
 
 	// 터치 관련 상태
 	let touchStartX = $state(0);
@@ -32,6 +34,13 @@
 
 	// 모바일 여부 확인
 	let isMobile = $state(false);
+
+	// 아바타 이미지 경로 상수 추가
+	const AVATAR_IMAGES = {
+		avata1: '/avata/avata1.webp',
+		avata2: '/avata/avata2.png',
+		avata3: '/avata/avata3.png'
+	} as const;
 
 	// 컴포넌트 마운트 시 모바일 체크
 	$effect(() => {
@@ -249,16 +258,7 @@
 						numberX <= characterRight
 					) {
 						if (num.isCorrect) {
-							const timeTaken = Date.now() - (problemStartTime ?? 0);
-							timeRecords = [...timeRecords, timeTaken];
-							problemIndex++;
-							if (problemIndex < 10) {
-								isTransitioning = true;
-								countdown = 5;
-								fallingNumbers = []; // 모든 떨어지는 숫자 제거
-							} else {
-								gameOver = true;
-							}
+							handleCorrectAnswer();
 							return false;
 						} else {
 							gameOver = true;
@@ -330,13 +330,37 @@
 		if (isPaused) return;
 
 		const moveValue = direction === 'left' ? -1 : 1;
-		velocity = Math.max(
-			Math.min(
-				velocity + moveValue * GAME_CONFIG.MOVEMENT.ACCELERATION,
-				GAME_CONFIG.MOVEMENT.MAX_SPEED
-			),
-			-GAME_CONFIG.MOVEMENT.MAX_SPEED
-		);
+		// 연속 이동을 위한 velocity 직접 설정
+		velocity = moveValue * GAME_CONFIG.MOVEMENT.MAX_SPEED * 0.7;
+	}
+
+	// 이미지 업로드 핸들러 추가
+	function handleImageUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		if (input.files && input.files[0]) {
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				customCharacterImage = e.target?.result as string;
+			};
+			reader.readAsDataURL(input.files[0]);
+		}
+	}
+
+	// 스테이지 전환 효과 수정을 위한 함수
+	function handleCorrectAnswer() {
+		const timeTaken = Date.now() - (problemStartTime ?? 0);
+		timeRecords = [...timeRecords, timeTaken];
+		problemIndex++;
+		if (problemIndex < 10) {
+			isTransitioning = true;
+			countdown = 5;
+			// 모든 게임 요소 초기화
+			fallingNumbers = [];
+			position = 50; // 캐릭터 위치 중앙으로 초기화
+			velocity = 0;
+		} else {
+			gameOver = true;
+		}
 	}
 </script>
 
@@ -368,6 +392,68 @@
 					</button>
 				</div>
 			{:else}
+				<h2 class="text-2xl text-white mb-4">캐릭터 선택</h2>
+				<div class="flex gap-4 mb-6">
+					<button
+						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata1'
+							? 'ring-2 ring-yellow-400'
+							: ''}"
+						onclick={() => (selectedCharacter = 'avata1')}
+					>
+						<img
+							src={AVATAR_IMAGES.avata1}
+							alt="Avatar 1"
+							class="w-14 h-14 object-cover rounded-lg"
+						/>
+					</button>
+					<button
+						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata2'
+							? 'ring-2 ring-yellow-400'
+							: ''}"
+						onclick={() => (selectedCharacter = 'avata2')}
+					>
+						<img
+							src={AVATAR_IMAGES.avata2}
+							alt="Avatar 2"
+							class="w-14 h-14 object-cover rounded-lg"
+						/>
+					</button>
+					<button
+						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata3'
+							? 'ring-2 ring-yellow-400'
+							: ''}"
+						onclick={() => (selectedCharacter = 'avata3')}
+					>
+						<img
+							src={AVATAR_IMAGES.avata3}
+							alt="Avatar 3"
+							class="w-14 h-14 object-cover rounded-lg"
+						/>
+					</button>
+					<button
+						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'custom'
+							? 'ring-2 ring-yellow-400'
+							: ''}"
+						onclick={() => (selectedCharacter = 'custom')}
+					>
+						<label class="cursor-pointer">
+							{#if customCharacterImage}
+								<img
+									src={customCharacterImage}
+									alt="Custom"
+									class="w-12 h-12 object-cover rounded-lg"
+								/>
+							{:else}
+								<div
+									class="w-12 h-12 bg-gray-500 flex items-center justify-center text-white rounded-lg"
+								>
+									+
+								</div>
+							{/if}
+							<input type="file" accept="image/*" class="hidden" onchange={handleImageUpload} />
+						</label>
+					</button>
+				</div>
 				<h2 class="text-2xl text-white mb-4">연산 선택</h2>
 				<div class="flex flex-col items-center gap-4">
 					<!-- 100미만 제한 체크박스 -->
@@ -428,12 +514,6 @@
 			</div>
 		</div>
 
-		{#if countdown > 0}
-			<div class="absolute top-24 left-0 w-full text-center text-2xl text-white">
-				다음 문제까지: {countdown}초
-			</div>
-		{/if}
-
 		{#each fallingNumbers as num (num.id)}
 			<div
 				class="absolute text-2xl text-white font-bold"
@@ -447,7 +527,7 @@
 
 		<!-- 캐릭터 (PC/모바일 공통) -->
 		<div
-			class="absolute bottom-4 w-12 h-12 bg-yellow-400 rounded-full"
+			class="absolute bottom-4 w-20 h-20"
 			class:cursor-grab={isMobile}
 			class:active:cursor-grabbing={isMobile}
 			style:left="{position}%"
@@ -455,7 +535,21 @@
 			ontouchstart={handleTouchStart}
 			ontouchmove={handleTouchMove}
 			ontouchend={handleTouchEnd}
-		></div>
+		>
+			{#if selectedCharacter === 'custom' && customCharacterImage}
+				<img
+					src={customCharacterImage}
+					alt="Custom"
+					class="w-full h-full object-cover rounded-lg"
+				/>
+			{:else if selectedCharacter !== 'custom'}
+				<img
+					src={AVATAR_IMAGES[selectedCharacter]}
+					alt="Avatar"
+					class="w-full h-full object-cover rounded-lg"
+				/>
+			{/if}
+		</div>
 
 		<!-- 모바일 컨트롤 -->
 		{#if isMobile}
@@ -531,10 +625,10 @@
 
 		<!-- 스테이지 전환 표시 -->
 		{#if isTransitioning}
-			<div
-				class="absolute top-1/2 left-0 w-full text-center text-4xl text-white transform -translate-y-1/2"
-			>
-				다음 문제 시작까지: {countdown}초
+			<div class="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center">
+				<div class="text-4xl text-white text-center">
+					다음 문제 시작까지: {countdown}초
+				</div>
 			</div>
 		{/if}
 	{/if}
