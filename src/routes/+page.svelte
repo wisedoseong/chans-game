@@ -1,5 +1,9 @@
 <script lang="ts">
 	// 상태 관리
+	const characterWidth = 20; // 캐릭터의 실제 히트박스 너비
+	const characterHeight = 20; // 캐릭터의 실제 히트박스 높이
+	const numberSize = 10; // 떨어지는 숫자의 히트박스 크기
+
 	let position = $state(50);
 	let velocity = $state(0);
 	let gameStarted = $state(false);
@@ -27,6 +31,8 @@
 	let isTransitioning = $state(false); // 다음 단계로 넘어가는 중인지 여부
 	let selectedCharacter = $state<'avata1' | 'avata2' | 'avata3' | 'custom'>('avata1');
 	let customCharacterImage = $state<string | null>(null);
+	let showHitbox = $state(false); // 개발 모드에서만 사용
+	let gameCleared = $state(false);
 
 	// 터치 관련 상태
 	let touchStartX = $state(0);
@@ -236,9 +242,9 @@
 			fallingNumbers = [...fallingNumbers, ...newNumbers];
 		}, GAME_CONFIG.NUMBERS.SPAWN_INTERVAL);
 
-		// 위치 업데이트 및 충돌 감지
+		// 위치 업데이트 및 충돌 감지 부분 수정
 		const updateInterval = setInterval(() => {
-			if (isPaused || isTransitioning) return; // 일시정지나 전환 중에는 업데이트 중지
+			if (isPaused || isTransitioning) return;
 
 			const newNumbers = fallingNumbers
 				.map((num) => ({
@@ -246,17 +252,26 @@
 					y: num.y + num.speed
 				}))
 				.filter((num) => {
-					const characterLeft = position - 5;
-					const characterRight = position + 5;
-					const numberX = num.x;
-					const numberY = num.y;
+					// 캐릭터의 히트박스 계산
+					const characterLeft = position - characterWidth / 2;
+					const characterRight = position + characterWidth / 2;
+					const characterTop = 85; // 캐릭터의 상단 위치
+					const characterBottom = 95; // 캐릭터의 하단 위치
 
-					if (
-						numberY >= 85 &&
-						numberY <= 95 &&
-						numberX >= characterLeft &&
-						numberX <= characterRight
-					) {
+					// 숫자의 히트박스 계산
+					const numberLeft = num.x - numberSize / 2;
+					const numberRight = num.x + numberSize / 2;
+					const numberTop = num.y - numberSize / 2;
+					const numberBottom = num.y + numberSize / 2;
+
+					// 충돌 감지 개선
+					const collision =
+						numberRight >= characterLeft &&
+						numberLeft <= characterRight &&
+						numberBottom >= characterTop &&
+						numberTop <= characterBottom;
+
+					if (collision) {
 						if (num.isCorrect) {
 							handleCorrectAnswer();
 							return false;
@@ -265,6 +280,8 @@
 							return false;
 						}
 					}
+
+					// 화면 밖으로 나간 숫자 제거
 					return num.y < 100;
 				});
 
@@ -359,8 +376,24 @@
 			position = 50; // 캐릭터 위치 중앙으로 초기화
 			velocity = 0;
 		} else {
-			gameOver = true;
+			gameCleared = true; // gameOver 대신 gameCleared로 변경
 		}
+	}
+
+	// 게임 초기화 함수 추가
+	function resetGame() {
+		gameStarted = false;
+		gameCleared = false;
+		gameOver = false;
+		difficulty = null;
+		operationType = null;
+		difficultySelected = false;
+		problemIndex = 0;
+		timeRecords = [];
+		position = 50;
+		velocity = 0;
+		fallingNumbers = [];
+		currentProblem = { question: '', answer: 0 };
 	}
 </script>
 
@@ -525,6 +558,12 @@
 					style:transform="translate(-50%, -50%)"
 				>
 					{num.value}
+					{#if showHitbox}
+						<div
+							class="absolute w-[10px] h-[10px] border-2 border-red-500"
+							style="transform: translate(-50%, -50%)"
+						></div>
+					{/if}
 				</div>
 			{/each}
 
@@ -554,6 +593,17 @@
 					/>
 				{/if}
 			</div>
+
+			{#if showHitbox}
+				<div
+					class="absolute border-2 border-blue-500"
+					style:left="{position}%"
+					style:bottom="4px"
+					style:width="{characterWidth}px"
+					style:height="{characterHeight}px"
+					style:transform="translateX(-50%)"
+				></div>
+			{/if}
 		</div>
 
 		{#if isMobile}
@@ -604,6 +654,37 @@
 			</div>
 		{/if}
 
+		{#if gameCleared}
+			<div
+				class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
+			>
+				<div class="text-6xl mb-8 animate-bounce">🎉</div>
+				<h2 class="text-4xl mb-4 text-yellow-400">축하합니다!</h2>
+				<h3 class="text-2xl mb-6">모든 문제를 완료했습니다!</h3>
+
+				<div class="text-xl mb-8">
+					<p class="mb-4">문제 해결 시간</p>
+					{#each timeRecords as time, index}
+						<p class="mb-2">
+							문제 {index + 1}: <span class="text-green-400">{(time / 1000).toFixed(2)}초</span>
+						</p>
+					{/each}
+					<p class="mt-4 text-2xl">
+						평균 시간: <span class="text-yellow-400">
+							{(timeRecords.reduce((a, b) => a + b, 0) / timeRecords.length / 1000).toFixed(2)}초
+						</span>
+					</p>
+				</div>
+
+				<button
+					onclick={resetGame}
+					class="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg text-xl hover:from-blue-600 hover:to-purple-600 transition-all duration-300 shadow-lg hover:shadow-xl"
+				>
+					처음으로 돌아가기
+				</button>
+			</div>
+		{/if}
+
 		{#if gameOver}
 			<div
 				class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
@@ -613,7 +694,7 @@
 				<div class="text-xl">
 					{#each timeRecords as time, index}
 						<p>
-							Problem {index + 1}: {(time / 1000).toFixed(2)}초
+							문제 {index + 1}: {(time / 1000).toFixed(2)}초
 						</p>
 					{/each}
 				</div>
