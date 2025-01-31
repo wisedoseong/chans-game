@@ -557,6 +557,18 @@
 		</div>
 
 		{#if isMobile}
+			<!-- 모바일용 일시정지 버튼 -->
+			<button
+				class="fixed top-4 right-4 w-12 h-12 bg-gray-800 bg-opacity-50 rounded-full text-white flex items-center justify-center z-10"
+				onclick={() => (isPaused = !isPaused)}
+			>
+				{#if isPaused}
+					▶
+				{:else}
+					❚❚
+				{/if}
+			</button>
+
 			<div class="flex-none h-[20vh] flex justify-between items-center px-4">
 				<button
 					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
