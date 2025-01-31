@@ -364,9 +364,9 @@
 	}
 </script>
 
-<div class="relative w-full h-screen bg-gray-900 overflow-hidden">
+<div class="fixed inset-0 bg-gray-900 overflow-hidden flex flex-col" style="touch-action: none;">
 	{#if !gameStarted}
-		<div class="absolute inset-0 flex flex-col items-center justify-center gap-6">
+		<div class="flex-1 flex flex-col items-center justify-center gap-6 overflow-auto">
 			<h1 class="text-4xl text-white mb-8">차니의 연산 게임</h1>
 
 			{#if !difficultySelected}
@@ -505,55 +505,59 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="absolute top-4 left-0 w-full text-center">
-			<div class="text-4xl text-white mb-2">
-				문제 {problemIndex + 1}/10
-			</div>
-			<div class="text-3xl text-yellow-400">
-				{currentProblem.question}
+		<div class="flex-none h-[20vh] flex items-center justify-center">
+			<div class="text-center">
+				<div class="text-4xl text-white mb-2">
+					문제 {problemIndex + 1}/10
+				</div>
+				<div class="text-3xl text-yellow-400">
+					{currentProblem.question}
+				</div>
 			</div>
 		</div>
 
-		{#each fallingNumbers as num (num.id)}
+		<div class="flex-1 relative">
+			{#each fallingNumbers as num (num.id)}
+				<div
+					class="absolute text-2xl text-white font-bold"
+					style:left="{num.x}%"
+					style:top="{num.y}%"
+					style:transform="translate(-50%, -50%)"
+				>
+					{num.value}
+				</div>
+			{/each}
+
 			<div
-				class="absolute text-2xl text-white font-bold"
-				style:left="{num.x}%"
-				style:top="{num.y}%"
-				style:transform="translate(-50%, -50%)"
+				class="absolute bottom-4 w-20 h-20"
+				class:cursor-grab={!isMobile}
+				class:active:cursor-grabbing={!isMobile}
+				class:bottom-4={!isMobile}
+				class:bottom-[calc(-50px)]={isMobile}
+				style:left="{position}%"
+				style:transform="translateX(-50%)"
+				ontouchstart={handleTouchStart}
+				ontouchmove={handleTouchMove}
+				ontouchend={handleTouchEnd}
 			>
-				{num.value}
+				{#if selectedCharacter === 'custom' && customCharacterImage}
+					<img
+						src={customCharacterImage}
+						alt="Custom"
+						class="w-full h-full object-cover rounded-lg"
+					/>
+				{:else if selectedCharacter !== 'custom'}
+					<img
+						src={AVATAR_IMAGES[selectedCharacter]}
+						alt="Avatar"
+						class="w-full h-full object-cover rounded-lg"
+					/>
+				{/if}
 			</div>
-		{/each}
-
-		<!-- 캐릭터 (PC/모바일 공통) -->
-		<div
-			class="absolute bottom-4 w-20 h-20"
-			class:cursor-grab={isMobile}
-			class:active:cursor-grabbing={isMobile}
-			style:left="{position}%"
-			style:transform="translateX(-50%)"
-			ontouchstart={handleTouchStart}
-			ontouchmove={handleTouchMove}
-			ontouchend={handleTouchEnd}
-		>
-			{#if selectedCharacter === 'custom' && customCharacterImage}
-				<img
-					src={customCharacterImage}
-					alt="Custom"
-					class="w-full h-full object-cover rounded-lg"
-				/>
-			{:else if selectedCharacter !== 'custom'}
-				<img
-					src={AVATAR_IMAGES[selectedCharacter]}
-					alt="Avatar"
-					class="w-full h-full object-cover rounded-lg"
-				/>
-			{/if}
 		</div>
 
-		<!-- 모바일 컨트롤 -->
 		{#if isMobile}
-			<div class="fixed bottom-4 left-0 right-0 flex justify-between px-4 z-10">
+			<div class="flex-none h-[20vh] flex justify-between items-center px-4">
 				<button
 					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
 					onpointerdown={() => handleDirectionButton('left')}
@@ -571,21 +575,8 @@
 					→
 				</button>
 			</div>
-
-			<!-- 모바일용 일시정지 버튼 -->
-			<button
-				class="fixed top-4 right-4 w-12 h-12 bg-gray-800 bg-opacity-50 rounded-full text-white flex items-center justify-center z-10"
-				onclick={() => (isPaused = !isPaused)}
-			>
-				{#if isPaused}
-					▶
-				{:else}
-					❚❚
-				{/if}
-			</button>
 		{/if}
 
-		<!-- 일시정지 화면 수정 -->
 		{#if isPaused}
 			<div class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
 				<div class="text-4xl text-white font-bold text-center">
@@ -623,7 +614,6 @@
 			</div>
 		{/if}
 
-		<!-- 스테이지 전환 표시 -->
 		{#if isTransitioning}
 			<div class="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center">
 				<div class="text-4xl text-white text-center">
@@ -633,3 +623,13 @@
 		{/if}
 	{/if}
 </div>
+
+<style>
+	/* iOS에서 바운스 스크롤 방지 */
+	:global(body) {
+		position: fixed;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+	}
+</style>
