@@ -26,6 +26,20 @@
 	let isPaused = $state(false);
 	let isTransitioning = $state(false); // 다음 단계로 넘어가는 중인지 여부
 
+	// 터치 관련 상태
+	let touchStartX = $state(0);
+	let isTouching = $state(false);
+
+	// 모바일 여부 확인
+	let isMobile = $state(false);
+
+	// 컴포넌트 마운트 시 모바일 체크
+	$effect(() => {
+		isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+			navigator.userAgent
+		);
+	});
+
 	// 게임 설정 상수
 	const GAME_CONFIG = {
 		// 스테이지별 설정
@@ -284,6 +298,46 @@
 			startNewProblem();
 		}
 	});
+
+	// 터치 이벤트 핸들러
+	function handleTouchStart(e: TouchEvent) {
+		touchStartX = e.touches[0].clientX;
+		isTouching = true;
+	}
+
+	function handleTouchMove(e: TouchEvent) {
+		if (!isTouching || isPaused) return;
+
+		const touchX = e.touches[0].clientX;
+		const diff = touchX - touchStartX;
+		const moveSpeed = diff * 0.1; // 이동 속도 조절
+
+		velocity = Math.max(
+			Math.min(moveSpeed, GAME_CONFIG.MOVEMENT.MAX_SPEED),
+			-GAME_CONFIG.MOVEMENT.MAX_SPEED
+		);
+
+		touchStartX = touchX;
+	}
+
+	function handleTouchEnd() {
+		isTouching = false;
+		velocity = 0;
+	}
+
+	// 방향 버튼 핸들러
+	function handleDirectionButton(direction: 'left' | 'right') {
+		if (isPaused) return;
+
+		const moveValue = direction === 'left' ? -1 : 1;
+		velocity = Math.max(
+			Math.min(
+				velocity + moveValue * GAME_CONFIG.MOVEMENT.ACCELERATION,
+				GAME_CONFIG.MOVEMENT.MAX_SPEED
+			),
+			-GAME_CONFIG.MOVEMENT.MAX_SPEED
+		);
+	}
 </script>
 
 <div class="relative w-full h-screen bg-gray-900 overflow-hidden">
@@ -391,11 +445,67 @@
 			</div>
 		{/each}
 
+		<!-- 캐릭터 (PC/모바일 공통) -->
 		<div
 			class="absolute bottom-4 w-12 h-12 bg-yellow-400 rounded-full"
+			class:cursor-grab={isMobile}
+			class:active:cursor-grabbing={isMobile}
 			style:left="{position}%"
 			style:transform="translateX(-50%)"
+			ontouchstart={handleTouchStart}
+			ontouchmove={handleTouchMove}
+			ontouchend={handleTouchEnd}
 		></div>
+
+		<!-- 모바일 컨트롤 -->
+		{#if isMobile}
+			<div class="fixed bottom-4 left-0 right-0 flex justify-between px-4 z-10">
+				<button
+					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
+					onpointerdown={() => handleDirectionButton('left')}
+					onpointerup={() => (velocity = 0)}
+					onpointerleave={() => (velocity = 0)}
+				>
+					←
+				</button>
+				<button
+					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
+					onpointerdown={() => handleDirectionButton('right')}
+					onpointerup={() => (velocity = 0)}
+					onpointerleave={() => (velocity = 0)}
+				>
+					→
+				</button>
+			</div>
+
+			<!-- 모바일용 일시정지 버튼 -->
+			<button
+				class="fixed top-4 right-4 w-12 h-12 bg-gray-800 bg-opacity-50 rounded-full text-white flex items-center justify-center z-10"
+				onclick={() => (isPaused = !isPaused)}
+			>
+				{#if isPaused}
+					▶
+				{:else}
+					❚❚
+				{/if}
+			</button>
+		{/if}
+
+		<!-- 일시정지 화면 수정 -->
+		{#if isPaused}
+			<div class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+				<div class="text-4xl text-white font-bold text-center">
+					일시정지
+					<div class="text-xl mt-4">
+						{#if isMobile}
+							계속하려면 재생 버튼을 누르세요
+						{:else}
+							계속하려면 스페이스바를 누르세요
+						{/if}
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		{#if gameOver}
 			<div
@@ -416,16 +526,6 @@
 				>
 					다시 시작
 				</button>
-			</div>
-		{/if}
-
-		<!-- 일시정지 상태 표시 -->
-		{#if isPaused}
-			<div class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
-				<div class="text-4xl text-white font-bold text-center">
-					일시정지
-					<div class="text-xl mt-4">계속하려면 스페이스바를 누르세요</div>
-				</div>
 			</div>
 		{/if}
 
