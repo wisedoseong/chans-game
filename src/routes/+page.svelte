@@ -1,728 +1,448 @@
 <script lang="ts">
-	// 상태 관리
-	const characterWidth = 20; // 캐릭터의 실제 히트박스 너비
-	const characterHeight = 20; // 캐릭터의 실제 히트박스 높이
-	const numberSize = 10; // 떨어지는 숫자의 히트박스 크기
+	import { onMount } from 'svelte';
+	//import { FloatingChat } from '$lib/components/ui/chat';
+	let isChatOpen = false;
+	let isMenuOpen = false;
 
-	let position = $state(50);
-	let velocity = $state(0);
-	let gameStarted = $state(false);
-	let difficulty = $state<'basic' | 'advanced' | null>(null);
-	let currentProblem = $state({ question: '', answer: 0 });
-	let fallingNumbers = $state<
-		Array<{
-			id: number;
-			value: number;
-			x: number;
-			y: number;
-			isCorrect: boolean;
-			speed: number;
-		}>
-	>([]);
-	let problemIndex = $state(0);
-	let timeRecords = $state<number[]>([]);
-	let gameOver = $state(false);
-	let countdown = $state(5);
-	let problemStartTime = $state<number | null>(null);
-	let operationType = $state<'addition' | 'subtraction' | 'both' | null>(null);
-	let difficultySelected = $state(false);
-	let limitUnder100 = $state(true); // 기본값 true로 설정
-	let isPaused = $state(false);
-	let isTransitioning = $state(false); // 다음 단계로 넘어가는 중인지 여부
-	let selectedCharacter = $state<'avata1' | 'avata2' | 'avata3' | 'custom'>('avata1');
-	let customCharacterImage = $state<string | null>(null);
-	let showHitbox = $state(false); // 개발 모드에서만 사용
-	let gameCleared = $state(false);
-
-	// 터치 관련 상태
-	let touchStartX = $state(0);
-	let isTouching = $state(false);
-
-	// 모바일 여부 확인
-	let isMobile = $state(false);
-
-	// 아바타 이미지 경로 상수 추가
-	const AVATAR_IMAGES = {
-		avata1: '/avata/avata1.webp',
-		avata2: '/avata/avata2.png',
-		avata3: '/avata/avata3.png'
-	} as const;
-
-	// 컴포넌트 마운트 시 모바일 체크
-	$effect(() => {
-		isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent
-		);
-	});
-
-	// 게임 설정 상수
-	const GAME_CONFIG = {
-		// 스테이지별 설정
-		STAGES: [
-			{ speed: 0.2, correctAnswerRate: 0.6 }, // 1-3 스테이지
-			{ speed: 0.3, correctAnswerRate: 0.4 }, // 4-6 스테이지
-			{ speed: 0.4, correctAnswerRate: 0.3 }, // 7-8 스테이지
-			{ speed: 0.5, correctAnswerRate: 0.2 } // 9-10 스테이지
-		],
-		// 캐릭터 이동 관련 설정
-		MOVEMENT: {
-			ACCELERATION: 0.5,
-			FRICTION: 0.92,
-			MAX_SPEED: 5
-		},
-		// 숫자 생성 관련 설정
-		NUMBERS: {
-			SPAWN_INTERVAL: 800, // ms
-			MIN_SPAWN_COUNT: 2,
-			MAX_SPAWN_COUNT: 3,
-			MAX_SUM: 999, // 제한 없을 때의 최대값
-			MAX_SUM_UNDER_100: 99 // 100미만 제한시 최대값
+	// 모바일 메뉴 토글 시 body에 overflow-hidden 클래스 추가/제거
+	const toggleMenu = () => {
+		isMenuOpen = !isMenuOpen;
+		if (isMenuOpen) {
+			document.body.classList.add('overflow-hidden');
+		} else {
+			document.body.classList.remove('overflow-hidden');
 		}
 	};
 
-	// 현재 스테이지 설정 가져오기
-	function getCurrentStageConfig(problemIndex: number) {
-		const stageIndex = Math.floor(problemIndex / 3); // 3문제마다 스테이지 변경
-		return GAME_CONFIG.STAGES[Math.min(stageIndex, GAME_CONFIG.STAGES.length - 1)];
-	}
-
-	// 문제 생성 함수 수정
-	function generateProblem() {
-		if (!difficulty || !operationType) return { question: '', answer: 0 };
-
-		let num1: number, num2: number;
-		const maxSum = limitUnder100
-			? GAME_CONFIG.NUMBERS.MAX_SUM_UNDER_100
-			: GAME_CONFIG.NUMBERS.MAX_SUM;
-
-		// 덧셈 문제 생성
-		function generateAdditionProblem() {
-			do {
-				// 100미만 제한시 10-59, 아닐 경우 10-899
-				const maxNum = limitUnder100 ? 50 : 450;
-				num1 = Math.floor(Math.random() * maxNum) + 10;
-				num2 = Math.floor(Math.random() * maxNum) + 10;
-			} while (
-				num1 + num2 > maxSum || // 최대 합 제한
-				(difficulty === 'basic' && (num1 % 10) + (num2 % 10) >= 10) // 기본 모드에서는 올림이 없도록
-			);
-			return { num1, num2, isAddition: true };
+	// Smooth scroll function (메뉴 선택 후에도 overflow-hidden 제거)
+	const smoothScroll = (id: string) => {
+		const element = document.getElementById(id);
+		if (element) {
+			element.scrollIntoView({ behavior: 'smooth' });
+			isMenuOpen = false;
+			document.body.classList.remove('overflow-hidden');
 		}
+	};
 
-		// 뺄셈 문제 생성
-		function generateSubtractionProblem() {
-			do {
-				// 100미만 제한시 10-99, 아닐 경우 10-999
-				const maxNum = limitUnder100 ? 89 : 989;
-				num1 = Math.floor(Math.random() * maxNum) + 10;
-				num2 = Math.floor(Math.random() * Math.min(num1 - 9, maxSum - num1)) + 1;
-			} while (
-				difficulty === 'basic' &&
-				num1 % 10 < num2 % 10 // 기본 모드에서는 내림이 없도록
-			);
-			return { num1, num2, isAddition: false };
-		}
-
-		let problem;
-		if (operationType === 'addition') {
-			problem = generateAdditionProblem();
-		} else if (operationType === 'subtraction') {
-			problem = generateSubtractionProblem();
-		} else {
-			// both인 경우 랜덤하게 선택
-			problem = Math.random() > 0.5 ? generateAdditionProblem() : generateSubtractionProblem();
-		}
-
-		return {
-			question: `${problem.num1} ${problem.isAddition ? '+' : '-'} ${problem.num2}`,
-			answer: problem.isAddition ? problem.num1 + problem.num2 : problem.num1 - problem.num2
-		};
-	}
-
-	// 잘못된 답 생성
-	function generateWrongAnswer(correctAnswer: number) {
-		const errors = [
-			correctAnswer + 10,
-			correctAnswer - 10,
-			correctAnswer + (Math.floor(Math.random() * 3) + 1),
-			correctAnswer - (Math.floor(Math.random() * 3) + 1),
-			correctAnswer + (Math.floor(Math.random() * 2) + 1) * 10,
-			correctAnswer - (Math.floor(Math.random() * 2) + 1) * 10
-		];
-		return errors[Math.floor(Math.random() * errors.length)];
-	}
-
-	// 떨어지는 숫자 생성 함수 수정
-	function generateFallingNumber() {
-		const stageConfig = getCurrentStageConfig(problemIndex);
-		const isCorrect = Math.random() < stageConfig.correctAnswerRate;
-		const correctAnswer = currentProblem.answer;
-		let number;
-
-		if (isCorrect) {
-			number = correctAnswer;
-		} else {
-			do {
-				number = generateWrongAnswer(correctAnswer);
-			} while (number === correctAnswer);
-		}
-
-		const baseSpeed = stageConfig.speed;
-		const randomSpeedOffset = Math.random() * 0.1; // 약간의 랜덤성 추가
-
-		return {
-			id: Date.now() + Math.random(),
-			value: number,
-			x: Math.random() * 80 + 10,
-			y: 0,
-			isCorrect,
-			speed: baseSpeed + randomSpeedOffset
-		};
-	}
-
-	// 새로운 문제 시작
-	function startNewProblem() {
-		const newProblem = generateProblem();
-		currentProblem = newProblem;
-		fallingNumbers = [];
-		problemStartTime = Date.now();
-		countdown = -1;
-	}
-
-	// 게임 로직
-	$effect(() => {
-		if (!gameStarted || gameOver) return;
-
-		// 키보드 이벤트 핸들러 수정
-		function handleKeyDown(e: KeyboardEvent) {
-			if (e.key === ' ') {
-				// 스페이스바
-				e.preventDefault();
-				isPaused = !isPaused;
-				return;
-			}
-
-			if (isPaused) return; // 일시정지 중에는 이동 불가
-
-			if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-				e.preventDefault();
-				const direction = e.key === 'ArrowLeft' ? -1 : 1;
-				velocity = Math.max(
-					Math.min(
-						velocity + direction * GAME_CONFIG.MOVEMENT.ACCELERATION,
-						GAME_CONFIG.MOVEMENT.MAX_SPEED
-					),
-					-GAME_CONFIG.MOVEMENT.MAX_SPEED
-				);
-			}
-		}
-
-		window.addEventListener('keydown', handleKeyDown);
-
-		// 움직임 업데이트
-		const moveInterval = setInterval(() => {
-			if (isPaused || isTransitioning) return; // 일시정지나 전환 중에는 업데이트 중지
-			velocity *= GAME_CONFIG.MOVEMENT.FRICTION;
-			position = Math.max(0, Math.min(100, position + velocity));
-		}, 16);
-
-		// 숫자 생성
-		const spawnInterval = setInterval(() => {
-			if (isPaused || isTransitioning) return; // 일시정지나 전환 중에는 생성 중지
-			const newNumbers = [];
-			const spawnCount =
-				Math.floor(
-					Math.random() *
-						(GAME_CONFIG.NUMBERS.MAX_SPAWN_COUNT - GAME_CONFIG.NUMBERS.MIN_SPAWN_COUNT + 1)
-				) + GAME_CONFIG.NUMBERS.MIN_SPAWN_COUNT;
-
-			for (let i = 0; i < spawnCount; i++) {
-				newNumbers.push(generateFallingNumber());
-			}
-			fallingNumbers = [...fallingNumbers, ...newNumbers];
-		}, GAME_CONFIG.NUMBERS.SPAWN_INTERVAL);
-
-		// 위치 업데이트 및 충돌 감지 부분 수정
-		const updateInterval = setInterval(() => {
-			if (isPaused || isTransitioning) return;
-
-			const newNumbers = fallingNumbers
-				.map((num) => ({
-					...num,
-					y: num.y + num.speed
-				}))
-				.filter((num) => {
-					// 캐릭터의 히트박스 계산
-					const characterLeft = position - characterWidth / 2;
-					const characterRight = position + characterWidth / 2;
-					const characterTop = 85; // 캐릭터의 상단 위치
-					const characterBottom = 95; // 캐릭터의 하단 위치
-
-					// 숫자의 히트박스 계산
-					const numberLeft = num.x - numberSize / 2;
-					const numberRight = num.x + numberSize / 2;
-					const numberTop = num.y - numberSize / 2;
-					const numberBottom = num.y + numberSize / 2;
-
-					// 충돌 감지 개선
-					const collision =
-						numberRight >= characterLeft &&
-						numberLeft <= characterRight &&
-						numberBottom >= characterTop &&
-						numberTop <= characterBottom;
-
-					if (collision) {
-						if (num.isCorrect) {
-							handleCorrectAnswer();
-							return false;
-						} else {
-							gameOver = true;
-							return false;
-						}
-					}
-
-					// 화면 밖으로 나간 숫자 제거
-					return num.y < 100;
-				});
-
-			fallingNumbers = newNumbers;
-		}, 16);
-
-		return () => {
-			window.removeEventListener('keydown', handleKeyDown);
-			clearInterval(moveInterval);
-			clearInterval(spawnInterval);
-			clearInterval(updateInterval);
-		};
+	// 혹시 모를 초기 overflow 상태 제거 (예: 라우트 변경 시)
+	onMount(() => {
+		document.body.classList.remove('overflow-hidden');
 	});
-
-	// 카운트다운 효과 수정
-	$effect(() => {
-		if (countdown > 0) {
-			const timer = setInterval(() => {
-				countdown--;
-			}, 1000);
-			return () => clearInterval(timer);
-		} else if (countdown === 0) {
-			isTransitioning = false; // 전환 상태 해제
-			startNewProblem();
-		}
-	});
-
-	// 게임 시작시 첫 문제 생성
-	$effect(() => {
-		if (gameStarted && !gameOver && problemIndex === 0) {
-			startNewProblem();
-		}
-	});
-
-	// 터치 이벤트 핸들러
-	function handleTouchStart(e: TouchEvent) {
-		touchStartX = e.touches[0].clientX;
-		isTouching = true;
-	}
-
-	function handleTouchMove(e: TouchEvent) {
-		if (!isTouching || isPaused) return;
-
-		const touchX = e.touches[0].clientX;
-		const diff = touchX - touchStartX;
-		const moveSpeed = diff * 0.1; // 이동 속도 조절
-
-		velocity = Math.max(
-			Math.min(moveSpeed, GAME_CONFIG.MOVEMENT.MAX_SPEED),
-			-GAME_CONFIG.MOVEMENT.MAX_SPEED
-		);
-
-		touchStartX = touchX;
-	}
-
-	function handleTouchEnd() {
-		isTouching = false;
-		velocity = 0;
-	}
-
-	// 방향 버튼 핸들러
-	function handleDirectionButton(direction: 'left' | 'right') {
-		if (isPaused) return;
-
-		const moveValue = direction === 'left' ? -1 : 1;
-		// 연속 이동을 위한 velocity 직접 설정
-		velocity = moveValue * GAME_CONFIG.MOVEMENT.MAX_SPEED * 0.7;
-	}
-
-	// 이미지 업로드 핸들러 추가
-	function handleImageUpload(event: Event) {
-		const input = event.target as HTMLInputElement;
-		if (input.files && input.files[0]) {
-			const reader = new FileReader();
-			reader.onload = (e) => {
-				customCharacterImage = e.target?.result as string;
-			};
-			reader.readAsDataURL(input.files[0]);
-		}
-	}
-
-	// 스테이지 전환 효과 수정을 위한 함수
-	function handleCorrectAnswer() {
-		const timeTaken = Date.now() - (problemStartTime ?? 0);
-		timeRecords = [...timeRecords, timeTaken];
-		problemIndex++;
-		if (problemIndex < 10) {
-			isTransitioning = true;
-			countdown = 5;
-			// 모든 게임 요소 초기화
-			fallingNumbers = [];
-			position = 50; // 캐릭터 위치 중앙으로 초기화
-			velocity = 0;
-		} else {
-			gameCleared = true; // gameOver 대신 gameCleared로 변경
-		}
-	}
-
-	// 게임 초기화 함수 추가
-	function resetGame() {
-		gameStarted = false;
-		gameCleared = false;
-		gameOver = false;
-		difficulty = null;
-		operationType = null;
-		difficultySelected = false;
-		problemIndex = 0;
-		timeRecords = [];
-		position = 50;
-		velocity = 0;
-		fallingNumbers = [];
-		currentProblem = { question: '', answer: 0 };
-	}
 </script>
 
-<div class="fixed inset-0 bg-gray-900 overflow-hidden flex flex-col" style="touch-action: none;">
-	{#if !gameStarted}
-		<div class="flex-1 flex flex-col items-center justify-center gap-6 overflow-auto">
-			<h1 class="text-4xl text-white mb-8">차니의 연산 게임</h1>
+<svelte:head>
+	<title>AI Enterprise Solutions | Global Technology Transformation</title>
+	<meta
+		name="description"
+		content="Enterprise AI integration, data migration solutions, and custom application development for global businesses."
+	/>
+</svelte:head>
 
-			{#if !difficultySelected}
-				<h2 class="text-2xl text-white mb-4">난이도 선택</h2>
-				<div class="flex gap-4">
-					<button
-						onclick={() => {
-							difficulty = 'basic';
-							difficultySelected = true;
-						}}
-						class="px-6 py-3 bg-blue-500 text-white rounded-lg text-xl hover:bg-blue-600"
-					>
-						기본 (올림 없음)
-					</button>
-					<button
-						onclick={() => {
-							difficulty = 'advanced';
-							difficultySelected = true;
-						}}
-						class="px-6 py-3 bg-green-500 text-white rounded-lg text-xl hover:bg-green-600"
-					>
-						심화 (올림 포함)
-					</button>
-				</div>
-			{:else}
-				<h2 class="text-2xl text-white mb-4">캐릭터 선택</h2>
-				<div class="flex gap-4 mb-6">
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata1'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'avata1')}
-					>
-						<img
-							src={AVATAR_IMAGES.avata1}
-							alt="Avatar 1"
-							class="w-14 h-14 object-cover rounded-lg"
-						/>
-					</button>
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata2'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'avata2')}
-					>
-						<img
-							src={AVATAR_IMAGES.avata2}
-							alt="Avatar 2"
-							class="w-14 h-14 object-cover rounded-lg"
-						/>
-					</button>
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata3'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'avata3')}
-					>
-						<img
-							src={AVATAR_IMAGES.avata3}
-							alt="Avatar 3"
-							class="w-14 h-14 object-cover rounded-lg"
-						/>
-					</button>
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'custom'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'custom')}
-					>
-						<label class="cursor-pointer">
-							{#if customCharacterImage}
-								<img
-									src={customCharacterImage}
-									alt="Custom"
-									class="w-12 h-12 object-cover rounded-lg"
-								/>
-							{:else}
-								<div
-									class="w-12 h-12 bg-gray-500 flex items-center justify-center text-white rounded-lg"
-								>
-									+
-								</div>
-							{/if}
-							<input type="file" accept="image/*" class="hidden" onchange={handleImageUpload} />
-						</label>
-					</button>
-				</div>
-				<h2 class="text-2xl text-white mb-4">연산 선택</h2>
-				<div class="flex flex-col items-center gap-4">
-					<!-- 100미만 제한 체크박스 -->
-					<label class="flex items-center gap-2 text-white text-lg">
-						<input type="checkbox" bind:checked={limitUnder100} class="w-4 h-4" />
-						<span>100미만으로 제한</span>
-					</label>
+<main class="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+	<!-- Enhanced Header with Mobile Menu -->
+	<header class="sticky top-0 z-50 bg-white/90 backdrop-blur-sm shadow-sm">
+		<nav class="container mx-auto px-4 py-4 flex justify-between items-center">
+			<div class="flex items-center space-x-2">
+				<div class="h-8 w-8 bg-gradient-to-r from-blue-600 to-blue-400 rounded-lg"></div>
+				<span class="text-xl font-bold text-gray-900">Global AI Solutions</span>
+			</div>
 
-					<!-- 기존 버튼들 -->
-					<div class="flex gap-4">
-						<button
-							onclick={() => {
-								operationType = 'addition';
-								gameStarted = true;
-							}}
-							class="px-6 py-3 bg-blue-500 text-white rounded-lg text-xl hover:bg-blue-600"
-						>
-							덧셈만
-						</button>
-						<button
-							onclick={() => {
-								operationType = 'subtraction';
-								gameStarted = true;
-							}}
-							class="px-6 py-3 bg-green-500 text-white rounded-lg text-xl hover:bg-green-600"
-						>
-							뺄셈만
-						</button>
-						<button
-							onclick={() => {
-								operationType = 'both';
-								gameStarted = true;
-							}}
-							class="px-6 py-3 bg-purple-500 text-white rounded-lg text-xl hover:bg-purple-600"
-						>
-							모두
-						</button>
-					</div>
-				</div>
+			<!-- Desktop Navigation -->
+			<div class="hidden md:flex space-x-8">
 				<button
-					onclick={() => {
-						difficultySelected = false;
-						difficulty = null;
-					}}
-					class="mt-4 px-4 py-2 bg-gray-500 text-white rounded-lg text-sm hover:bg-gray-600"
+					onclick={() => smoothScroll('data-migration')}
+					class="text-gray-600 hover:text-blue-600 transition-colors">Data Migration</button
 				>
-					난이도 다시 선택
-				</button>
-			{/if}
-		</div>
-	{:else}
-		<div class="flex-none h-[20vh] flex items-center justify-center">
-			<div class="text-center">
-				<div class="text-4xl text-white mb-2">
-					문제 {problemIndex + 1}/10
-				</div>
-				<div class="text-3xl text-yellow-400">
-					{currentProblem.question}
-				</div>
-			</div>
-		</div>
-
-		<div class="flex-1 relative">
-			{#each fallingNumbers as num (num.id)}
-				<div
-					class="absolute text-2xl text-white font-bold"
-					style:left="{num.x}%"
-					style:top="{num.y}%"
-					style:transform="translate(-50%, -50%)"
+				<button
+					onclick={() => smoothScroll('custom-apps')}
+					class="text-gray-600 hover:text-blue-600 transition-colors">Custom Solutions</button
 				>
-					{num.value}
-					{#if showHitbox}
-						<div
-							class="absolute w-[10px] h-[10px] border-2 border-red-500"
-							style="transform: translate(-50%, -50%)"
-						></div>
-					{/if}
-				</div>
-			{/each}
-
-			<div
-				class="absolute bottom-4 w-20 h-20"
-				class:cursor-grab={!isMobile}
-				class:active:cursor-grabbing={!isMobile}
-				class:bottom-4={!isMobile}
-				class:bottom-[calc(-50px)]={isMobile}
-				style:left="{position}%"
-				style:transform="translateX(-50%)"
-				ontouchstart={handleTouchStart}
-				ontouchmove={handleTouchMove}
-				ontouchend={handleTouchEnd}
-			>
-				{#if selectedCharacter === 'custom' && customCharacterImage}
-					<img
-						src={customCharacterImage}
-						alt="Custom"
-						class="w-full h-full object-cover rounded-lg"
-					/>
-				{:else if selectedCharacter !== 'custom'}
-					<img
-						src={AVATAR_IMAGES[selectedCharacter]}
-						alt="Avatar"
-						class="w-full h-full object-cover rounded-lg"
-					/>
-				{/if}
+				<button
+					onclick={() => smoothScroll('ai-consulting')}
+					class="text-gray-600 hover:text-blue-600 transition-colors">AI Consulting</button
+				>
+				<button
+					onclick={() => smoothScroll('contact')}
+					class="text-gray-600 hover:text-blue-600 transition-colors">Contact</button
+				>
 			</div>
 
-			{#if showHitbox}
-				<div
-					class="absolute border-2 border-blue-500"
-					style:left="{position}%"
-					style:bottom="4px"
-					style:width="{characterWidth}px"
-					style:height="{characterHeight}px"
-					style:transform="translateX(-50%)"
-				></div>
-			{/if}
-		</div>
-
-		{#if isMobile}
-			<!-- 모바일용 일시정지 버튼 -->
-			<button
-				class="fixed top-4 right-4 w-12 h-12 bg-gray-800 bg-opacity-50 rounded-full text-white flex items-center justify-center z-10"
-				onclick={() => (isPaused = !isPaused)}
-			>
-				{#if isPaused}
-					▶
-				{:else}
-					❚❚
-				{/if}
+			<!-- Mobile Menu Toggle -->
+			<button onclick={toggleMenu} class="md:hidden p-2" aria-label="Toggle Menu">
+				<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M4 6h16M4 12h16M4 18h16"
+					/>
+				</svg>
 			</button>
+		</nav>
 
-			<div class="flex-none h-[20vh] flex justify-between items-center px-4">
-				<button
-					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
-					onpointerdown={() => handleDirectionButton('left')}
-					onpointerup={() => (velocity = 0)}
-					onpointerleave={() => (velocity = 0)}
-				>
-					←
-				</button>
-				<button
-					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
-					onpointerdown={() => handleDirectionButton('right')}
-					onpointerup={() => (velocity = 0)}
-					onpointerleave={() => (velocity = 0)}
-				>
-					→
-				</button>
-			</div>
-		{/if}
-
-		{#if isPaused}
-			<div class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
-				<div class="text-4xl text-white font-bold text-center">
-					일시정지
-					<div class="text-xl mt-4">
-						{#if isMobile}
-							계속하려면 재생 버튼을 누르세요
-						{:else}
-							계속하려면 스페이스바를 누르세요
-						{/if}
-					</div>
+		<!-- Mobile Menu -->
+		{#if isMenuOpen}
+			<div class="md:hidden absolute top-full w-full bg-white shadow-lg">
+				<div class="px-4 py-4 space-y-4">
+					<button onclick={() => smoothScroll('data-migration')} class="block w-full text-left"
+						>Data Migration</button
+					>
+					<button onclick={() => smoothScroll('custom-apps')} class="block w-full text-left"
+						>Custom Solutions</button
+					>
+					<button onclick={() => smoothScroll('ai-consulting')} class="block w-full text-left"
+						>AI Consulting</button
+					>
+					<button onclick={() => smoothScroll('contact')} class="block w-full text-left"
+						>Contact</button
+					>
 				</div>
 			</div>
 		{/if}
+	</header>
 
-		{#if gameCleared}
-			<div
-				class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
-			>
-				<div class="text-6xl mb-8 animate-bounce">🎉</div>
-				<h2 class="text-4xl mb-4 text-yellow-400">축하합니다!</h2>
-				<h3 class="text-2xl mb-6">모든 문제를 완료했습니다!</h3>
+	<!-- Hero Section -->
+	<section class="container mx-auto px-4 py-20 md:py-32">
+		<div class="grid md:grid-cols-2 gap-12 items-center">
+			<div>
+				<p class="text-blue-600 font-semibold uppercase mb-4">Next-Gen Enterprise Solutions</p>
+				<h1 class="text-5xl md:text-6xl font-bold text-gray-900 leading-tight mb-6">
+					AI-Driven Business <span class="text-blue-600">Transformation</span>
+				</h1>
+				<div class="flex space-x-4 mb-8">
+					<a
+						href="#contact"
+						class="px-8 py-4 bg-blue-600 text-white font-semibold rounded-lg shadow-xl hover:bg-blue-700 transition-all hover:shadow-2xl"
+					>
+						Schedule Consultation
+					</a>
+				</div>
+				<div class="flex items-center space-x-6 opacity-75">
+					<span class="text-sm font-medium">Trusted by industry leaders:</span>
+					<div class="flex space-x-4">
+						<div class="h-8 w-8 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full"></div>
+						<div class="h-8 w-8 bg-gradient-to-r from-purple-500 to-purple-600 rounded-full"></div>
+						<div
+							class="h-8 w-8 bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-full"
+						></div>
+					</div>
+				</div>
+			</div>
+			<div class="bg-gradient-to-br from-blue-100 to-white p-8 rounded-2xl shadow-2xl">
+				<!-- Placeholder for 3D/Interactive demo -->
+				<div class="aspect-video bg-gray-100 rounded-xl flex items-center justify-center">
+					<span class="text-gray-400">AI Infrastructure Demo</span>
+				</div>
+			</div>
+		</div>
+	</section>
 
-				<div class="text-xl mb-8">
-					<p class="mb-4">문제 해결 시간</p>
-					{#each timeRecords as time, index}
-						<p class="mb-2">
-							문제 {index + 1}: <span class="text-green-400">{(time / 1000).toFixed(2)}초</span>
-						</p>
-					{/each}
-					<p class="mt-4 text-2xl">
-						평균 시간: <span class="text-yellow-400">
-							{(timeRecords.reduce((a, b) => a + b, 0) / timeRecords.length / 1000).toFixed(2)}초
-						</span>
+	<!-- Solutions Showcase -->
+	<section class="py-20 bg-gradient-to-b to-blue-50 from-white">
+		<div class="container mx-auto px-4">
+			<div class="text-center mb-16">
+				<p class="text-blue-600 font-semibold uppercase mb-3">Our Expertise</p>
+				<h2 class="text-4xl font-bold text-gray-900 mb-8">Transforming Business Ecosystems</h2>
+			</div>
+			<div class="grid md:grid-cols-3 gap-8">
+				<div class="p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow">
+					<div class="w-12 h-12 bg-blue-100 rounded-lg mb-6 flex items-center justify-center">
+						<span class="text-blue-600 text-2xl">🏬</span>
+					</div>
+					<h3 class="text-xl font-bold mb-4">E-commerce Systems</h3>
+					<p class="text-gray-600">
+						AI-powered inventory management and personalized shopping experiences
+					</p>
+				</div>
+				<!-- Add more solution cards -->
+			</div>
+		</div>
+	</section>
+
+	<!-- Core Services -->
+	<section class="bg-white py-20">
+		<div class="container mx-auto px-4">
+			<div class="text-center mb-16">
+				<p class="text-blue-600 font-semibold uppercase mb-3">What We Offer</p>
+				<h2 class="text-4xl font-bold text-gray-900 mb-8">Enterprise-Grade Solutions</h2>
+			</div>
+
+			<div class="grid md:grid-cols-3 gap-8">
+				<div class="p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow">
+					<div class="w-12 h-12 bg-blue-100 rounded-lg mb-6 flex items-center justify-center">
+						<span class="text-blue-600 text-2xl">⚙️</span>
+					</div>
+					<h3 class="text-xl font-bold mb-4">AI Infrastructure Design</h3>
+					<p class="text-gray-600">
+						End-to-end implementation of scalable AI ecosystems with automated MLOps pipelines and
+						enterprise-grade security
 					</p>
 				</div>
 
-				<button
-					onclick={resetGame}
-					class="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg text-xl hover:from-blue-600 hover:to-purple-600 transition-all duration-300 shadow-lg hover:shadow-xl"
-				>
-					처음으로 돌아가기
-				</button>
-			</div>
-		{/if}
+				<div class="p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow">
+					<div class="w-12 h-12 bg-blue-100 rounded-lg mb-6 flex items-center justify-center">
+						<span class="text-blue-600 text-2xl">📊</span>
+					</div>
+					<h3 class="text-xl font-bold mb-4">Process Optimization</h3>
+					<p class="text-gray-600">
+						Custom ERP integrations and legacy system modernization using microservices architecture
+						and cloud-native solutions
+					</p>
+				</div>
 
-		{#if gameOver}
-			<div
-				class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
-			>
-				<h2 class="text-4xl mb-4">Game Over!</h2>
-				<p class="text-2xl mb-4">완료된 문제: {problemIndex}/10</p>
-				<div class="text-xl">
-					{#each timeRecords as time, index}
-						<p>
-							문제 {index + 1}: {(time / 1000).toFixed(2)}초
+				<div class="p-8 bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow">
+					<div class="w-12 h-12 bg-blue-100 rounded-lg mb-6 flex items-center justify-center">
+						<span class="text-blue-600 text-2xl">🧠</span>
+					</div>
+					<h3 class="text-xl font-bold mb-4">LLM Research & Development</h3>
+					<p class="text-gray-600">
+						Domain-specific language model training and AI-powered workflow automation with
+						continuous performance monitoring
+					</p>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- Legacy Modernization -->
+	<section class="py-20 bg-gray-50">
+		<div class="container mx-auto px-4">
+			<div class="grid md:grid-cols-2 gap-12 items-center">
+				<div class="space-y-6">
+					<p class="text-blue-600 font-semibold uppercase mb-2">System Modernization</p>
+					<h2 class="text-4xl font-bold text-gray-900">Future-Proof Your Technology Stack</h2>
+					<ul class="space-y-4">
+						<li class="flex items-center space-x-3">
+							<div
+								class="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center"
+							>
+								✓
+							</div>
+							<span class="text-gray-700">Legacy system analysis & technical debt assessment</span>
+						</li>
+						<!-- ... more list items ... -->
+					</ul>
+				</div>
+				<div class="bg-gradient-to-br from-blue-100 to-white p-8 rounded-2xl shadow-xl">
+					<!-- Modernization process visualization -->
+					<div class="aspect-video bg-gray-100 rounded-xl flex items-center justify-center">
+						<span class="text-gray-400">Modernization Roadmap</span>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- Blog Section -->
+	<section id="blog" class="py-20 bg-white">
+		<div class="container mx-auto px-4">
+			<div class="text-center mb-16">
+				<p class="text-blue-600 font-semibold uppercase mb-3">Latest Insights</p>
+				<h2 class="text-4xl font-bold text-gray-900 mb-8">AI Innovation Blog</h2>
+			</div>
+			<div class="grid md:grid-cols-3 gap-8">
+				<article
+					class="group overflow-hidden rounded-xl shadow-lg hover:shadow-2xl transition-shadow"
+				>
+					<div class="aspect-video bg-gray-100"></div>
+					<div class="p-6">
+						<time class="text-sm text-gray-500">March 15, 2024</time>
+						<h3 class="text-xl font-bold mt-2 mb-3">LLM Integration Patterns</h3>
+						<p class="text-gray-600 line-clamp-3">
+							Exploring modern approaches to enterprise AI integration...
 						</p>
+						<a href="None" class="mt-4 inline-flex items-center text-blue-600 hover:text-blue-800">
+							Read More
+							<svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 5l7 7-7 7"
+								/>
+							</svg>
+						</a>
+					</div>
+				</article>
+				<!-- Add more blog posts -->
+			</div>
+		</div>
+	</section>
+
+	<!-- Data Migration Section -->
+	<section id="data-migration" class="py-20 bg-white">
+		<div class="container mx-auto px-4">
+			<div class="text-center mb-16">
+				<p class="text-blue-600 font-semibold uppercase mb-3">Seamless Data Transition</p>
+				<h2 class="text-4xl font-bold text-gray-900 mb-8">Intelligent Data Migration</h2>
+				<p class="text-gray-600 max-w-3xl mx-auto">
+					AI-powered data migration across heterogeneous systems with automated validation.
+					Preserving data integrity during platform transitions.
+				</p>
+			</div>
+
+			<div class="grid md:grid-cols-4 gap-8">
+				{#each ['Shopify', 'Amazon', 'Naver', 'Cafe24'] as platform}
+					<div class="p-6 bg-blue-50 rounded-xl hover:scale-105 transition-transform">
+						<div class="aspect-square bg-gray-100 rounded-lg mb-4"></div>
+						<h3 class="text-xl font-semibold">{platform} Migration</h3>
+						<p class="text-gray-600 mt-2">Automated schema conversion & data validation</p>
+					</div>
+				{/each}
+			</div>
+		</div>
+	</section>
+
+	<!-- Custom Solutions Section -->
+	<section id="custom-apps" class="py-20 bg-gray-50">
+		<div class="container mx-auto px-4">
+			<div class="text-center mb-16">
+				<p class="text-blue-600 font-semibold uppercase mb-3">Tailored Solutions</p>
+				<h2 class="text-4xl font-bold text-gray-900 mb-8">Enterprise Application Development</h2>
+			</div>
+
+			<div class="grid md:grid-cols-2 gap-8">
+				<div class="p-8 bg-white rounded-xl shadow-lg">
+					<h3 class="text-2xl font-bold mb-4">E-commerce Systems</h3>
+					<ul class="space-y-4 text-gray-600">
+						<li class="flex items-center space-x-3">
+							<svg
+								class="w-5 h-5 text-green-500"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M5 13l4 4L19 7"
+								/>
+							</svg>
+							<span>AI-powered inventory optimization</span>
+						</li>
+						<!-- Add more list items -->
+					</ul>
+				</div>
+
+				<div class="grid grid-cols-2 gap-4">
+					{#each ['CRM Analytics', 'Appointment System', 'Coupon Management', 'Logistics AI'] as solution}
+						<div class="p-6 bg-white rounded-xl hover:shadow-lg transition-shadow">
+							<h4 class="font-semibold mb-2">{solution}</h4>
+							<p class="text-sm text-gray-600">Custom implementation for your workflow</p>
+						</div>
 					{/each}
 				</div>
-				<button
-					onclick={() => window.location.reload()}
-					class="mt-6 px-6 py-3 bg-blue-500 rounded-lg hover:bg-blue-600"
-				>
-					다시 시작
-				</button>
 			</div>
-		{/if}
+		</div>
+	</section>
 
-		{#if isTransitioning}
-			<div class="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center">
-				<div class="text-4xl text-white text-center">
-					다음 문제 시작까지: {countdown}초
+	<!-- AI Consulting Section -->
+	<section id="ai-consulting" class="py-20 bg-white">
+		<div class="container mx-auto px-4">
+			<div class="text-center mb-16">
+				<p class="text-blue-600 font-semibold uppercase mb-3">AI Integration</p>
+				<h2 class="text-4xl font-bold text-gray-900 mb-8">Domain-Specific Language Models</h2>
+			</div>
+
+			<div class="max-w-5xl mx-auto grid md:grid-cols-3 gap-8">
+				<div class="p-8 bg-gradient-to-b from-blue-50 to-white rounded-xl shadow-lg">
+					<h3 class="text-xl font-bold mb-4">1. Legacy Analysis</h3>
+					<p class="text-gray-600">Technical debt assessment and modernization roadmap</p>
+				</div>
+				<!-- Add more steps -->
+			</div>
+		</div>
+	</section>
+
+	<!-- Global Network Section -->
+	<section class="py-20 bg-gray-900 text-white">
+		<div class="container mx-auto px-4">
+			<div class="text-center mb-16">
+				<p class="text-blue-400 font-semibold uppercase mb-3">Worldwide Presence</p>
+				<h2 class="text-4xl font-bold mb-8">Global Research & Development Network</h2>
+			</div>
+			<div class="grid md:grid-cols-4 gap-8 text-center">
+				{#each ['Seoul', 'Silicon Valley', 'Berlin', 'Singapore'] as location}
+					<div class="p-6 bg-gray-800 rounded-xl">
+						<h3 class="text-xl font-semibold mb-2">{location}</h3>
+						<p class="text-gray-400">R&D Center</p>
+					</div>
+				{/each}
+			</div>
+		</div>
+	</section>
+
+	<!-- Footer -->
+	<footer class="bg-gray-900 text-gray-300 py-12">
+		<div class="container mx-auto px-4">
+			<div class="grid md:grid-cols-4 gap-8 mb-8">
+				<div>
+					<h4 class="text-white font-semibold mb-4">AI Solutions</h4>
+					<p class="text-sm">123 Tech Valley</p>
+					<p class="text-sm">Seoul, South Korea</p>
+				</div>
+				<div>
+					<h4 class="text-white font-semibold mb-4">Services</h4>
+					<ul class="space-y-2 text-sm">
+						<li>
+							<a href="None" class="hover:text-blue-400 transition-colors">ERP Modernization</a>
+						</li>
+						<li><a href="None" class="hover:text-blue-400 transition-colors">AI Integration</a></li>
+					</ul>
+				</div>
+				<div>
+					<h4 class="text-white font-semibold mb-4">Legal</h4>
+					<!-- Legal links -->
+				</div>
+				<div>
+					<h4 class="text-white font-semibold mb-4">Connect</h4>
+					<!-- Social links -->
+				</div>
+			</div>
+			<div class="border-t border-gray-800 pt-8 text-center text-sm">
+				<p>&copy; 2024 AI Solutions. All rights reserved.</p>
+			</div>
+		</div>
+	</footer>
+
+	<!-- Floating Chat -->
+	<div class="fixed bottom-8 right-8 z-50">
+		<button
+			onclick={() => (isChatOpen = !isChatOpen)}
+			class="p-4 bg-blue-600 text-white rounded-full shadow-xl hover:bg-blue-700 transition-all"
+			aria-label="Chat with AI"
+		>
+			<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+				/>
+			</svg>
+		</button>
+
+		{#if isChatOpen}
+			<div class="absolute bottom-20 right-0 w-80 bg-white rounded-xl shadow-2xl">
+				<div class="p-4 border-b border-gray-200 flex justify-between items-center">
+					<h3 class="font-semibold">AI Assistant</h3>
+					<button onclick={() => (isChatOpen = false)} class="text-gray-500 hover:text-gray-700">
+						&times;
+					</button>
+				</div>
+				<div class="h-64 p-4 overflow-y-auto">
+					<!-- Chat messages -->
+					<div class="text-sm text-gray-600">How can we help you today?</div>
+				</div>
+				<div class="p-4 border-t border-gray-200">
+					<input
+						type="text"
+						placeholder="Type your message..."
+						class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+					/>
 				</div>
 			</div>
 		{/if}
-	{/if}
-</div>
-
-<style>
-	/* iOS에서 바운스 스크롤 방지 */
-	:global(body) {
-		position: fixed;
-		width: 100%;
-		height: 100%;
-		overflow: hidden;
-	}
-</style>
+	</div>
+</main>

@@ -9,6 +9,7 @@ node_modules
 /.svelte-kit
 /build
 
+
 # OS
 .DS_Store
 Thumbs.db
@@ -26,3 +27,4 @@ vite.config.ts.timestamp-*
 # LLM Rules
 .cursorrules
 .clinerules
+#.svelte5rules
