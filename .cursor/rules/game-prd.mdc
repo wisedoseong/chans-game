@@ -1,0 +1,12 @@
+---
+description: game require 
+globs: 
+---
+
+
+1. **UI 및 상태 관리**: Svelte 자체 기능.
+2. **충돌 감지 및 물리 효과**: Matter.js.
+3. **그래픽 렌더링**: PixiJS (또는 Canvas API).
+4. **사운드 효과**: Howler.js.
+
+를 이용한 경량 웹게임을 만듭니다. 

@@ -1,4 +1,9 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import * as PIXI from 'pixi.js';
+	import * as Matter from 'matter-js';
+	import { Howl } from 'howler';
+
 	// 상태 관리
 	const characterWidth = 20; // 캐릭터의 실제 히트박스 너비
 	const characterHeight = 20; // 캐릭터의 실제 히트박스 높이
@@ -44,11 +49,12 @@
 	// 모바일 여부 확인
 	let isMobile = $state(false);
 
-	// 아바타 이미지 경로 상수 추가
+	// 아바타 이미지 경로 상수 수정
 	const AVATAR_IMAGES = {
 		avata1: '/avata/avata1.webp',
 		avata2: '/avata/avata2.png',
-		avata3: '/avata/avata3.png'
+		avata3: '/avata/avata3.png',
+		custom: '' // 커스텀 이미지를 위한 빈 문자열
 	} as const;
 
 	// 컴포넌트 마운트 시 모바일 체크
@@ -424,335 +430,521 @@
 		currentProblem = { question: '', answer: 0 };
 		lives = 3;
 	}
+
+	// 기존의 sounds 상수 제거
+	// 대신 sounds 변수를 클라이언트에서 onMount 시점에 초기화
+	let sounds: { correct: Howl | null; wrong: Howl | null; background: Howl | null } = {
+		correct: null,
+		wrong: null,
+		background: null
+	};
+
+	// Matter.js 엔진 설정
+	let engine: Matter.Engine;
+	let render: Matter.Render;
+	let runner: Matter.Runner;
+	let world: Matter.World;
+
+	// PixiJS 설정
+	let app: PIXI.Application;
+	let gameContainer: HTMLDivElement;
+	let characterSprite: PIXI.Sprite;
+	let numberSprites: Map<Matter.Body, PIXI.Text> = new Map();
+
+	// Matter.js 초기화 함수
+	function initPhysics() {
+		engine = Matter.Engine.create();
+		world = engine.world;
+		world.gravity.y = 0.5; // 중력 설정
+
+		// 벽 생성
+		const wallOptions = {
+			isStatic: true,
+			render: { visible: false }
+		};
+
+		Matter.World.add(world, [
+			// 바닥
+			Matter.Bodies.rectangle(400, 600, 800, 60, wallOptions),
+			// 왼쪽 벽
+			Matter.Bodies.rectangle(0, 300, 60, 600, wallOptions),
+			// 오른쪽 벽
+			Matter.Bodies.rectangle(800, 300, 60, 600, wallOptions)
+		]);
+
+		runner = Matter.Runner.create();
+		Matter.Runner.run(runner, engine);
+	}
+
+	// PixiJS 초기화 함수 수정
+	function initPixi() {
+		app = new PIXI.Application({
+			width: window.innerWidth,
+			height: window.innerHeight,
+			backgroundColor: 0x1a1a1a,
+			resolution: window.devicePixelRatio || 1
+		});
+
+		gameContainer.appendChild(app.view as HTMLCanvasElement);
+
+		// 캐릭터 스프라이트 생성
+		const textureUrl =
+			selectedCharacter === 'custom' && customCharacterImage
+				? customCharacterImage
+				: AVATAR_IMAGES[selectedCharacter];
+		const texture = PIXI.Texture.from(textureUrl);
+		characterSprite = new PIXI.Sprite(texture);
+		characterSprite.anchor.set(0.5);
+		characterSprite.width = 40;
+		characterSprite.height = 40;
+		app.stage.addChild(characterSprite);
+
+		// 리사이즈 이벤트 처리
+		window.addEventListener('resize', () => {
+			app.renderer.resize(window.innerWidth, window.innerHeight);
+		});
+	}
+
+	// 게임 요소 업데이트 함수
+	function updateGame() {
+		if (!app || isPaused || isTransitioning) return;
+
+		// 캐릭터 위치 업데이트
+		characterSprite.x = (position / 100) * window.innerWidth;
+		characterSprite.y = window.innerHeight - 60;
+
+		// 떨어지는 숫자들 업데이트
+		numberSprites.forEach((sprite, body) => {
+			sprite.x = body.position.x;
+			sprite.y = body.position.y;
+			sprite.rotation = body.angle;
+		});
+
+		requestAnimationFrame(updateGame);
+	}
+
+	// 떨어지는 숫자 생성 함수 수정
+	function createFallingNumber(number: number, x: number, isCorrect: boolean) {
+		const body = Matter.Bodies.circle(x, 0, 20, {
+			restitution: 0.6,
+			friction: 0.001,
+			density: 0.001,
+			label: isCorrect ? 'correct' : 'wrong'
+		});
+
+		const text = new PIXI.Text(number.toString(), {
+			fontFamily: 'Arial',
+			fontSize: 24,
+			fill: isCorrect ? 0x00ff00 : 0xffffff
+		});
+		text.anchor.set(0.5);
+		app.stage.addChild(text);
+		numberSprites.set(body, text);
+
+		Matter.World.add(world, body);
+	}
+
+	onMount(() => {
+		// 클라이언트에서만 사운드를 초기화
+		// if (typeof window !== 'undefined') {
+		// 	try {
+		// 		sounds.correct = new Howl({
+		// 			src: ['/sounds/correct.mp3'],
+		// 			onloaderror: () => {
+		// 				console.error('Sound load error: /sounds/correct.mp3');
+		// 			}
+		// 		});
+		// 		sounds.wrong = new Howl({
+		// 			src: ['/sounds/wrong.mp3'],
+		// 			onloaderror: () => {
+		// 				console.error('Sound load error: /sounds/wrong.mp3');
+		// 			}
+		// 		});
+		// 		sounds.background = new Howl({
+		// 			src: ['/sounds/background.mp3'],
+		// 			loop: true,
+		// 			volume: 0.5,
+		// 			onloaderror: () => {
+		// 				console.error('Sound load error: /sounds/background.mp3');
+		// 			}
+		// 		});
+		// 	} catch (e) {
+		// 		console.error('Sound initialization error', e);
+		// 		sounds.correct = sounds.wrong = sounds.background = null;
+		// 	}
+		// }
+
+		if (gameStarted) {
+			initPhysics();
+			initPixi();
+			updateGame();
+			// 조건부로 사운드 재생
+			sounds.background?.play();
+		}
+
+		return () => {
+			if (app) {
+				app.destroy(true);
+			}
+			if (runner) {
+				Matter.Runner.stop(runner);
+			}
+			sounds.background?.stop();
+		};
+	});
 </script>
 
 <div class="fixed inset-0 bg-gray-900 overflow-hidden flex flex-col" style="touch-action: none;">
-	<!-- 추가: 좌측 상단에 생명(하트) 표시 -->
-	{#if gameStarted}
-		<div class="absolute top-4 left-4 flex gap-2 z-20">
-			{#each Array(lives) as _, i}
-				<span class="text-red-500 text-2xl" title="Life {i + 1}">❤️</span>
-			{/each}
-		</div>
-	{/if}
+	<div bind:this={gameContainer} class="absolute inset-0 z-0"></div>
 
-	{#if !gameStarted}
-		<div class="flex-1 flex flex-col items-center justify-center gap-6 overflow-auto">
-			<h1 class="text-4xl text-white mb-8">힘내라! 연산 하자</h1>
+	<!-- UI 레이어 -->
+	<div class="relative z-10 flex-1 flex flex-col">
+		<!-- 추가: 좌측 상단에 생명(하트) 표시 -->
+		{#if gameStarted}
+			<div class="absolute top-4 left-4 flex gap-2">
+				{#each Array(lives) as _, i}
+					<span class="text-red-500 text-2xl" title="Life {i + 1}">❤️</span>
+				{/each}
+			</div>
+		{/if}
 
-			{#if !difficultySelected}
-				<h2 class="text-2xl text-white mb-4">난이도 선택</h2>
-				<div class="flex gap-4">
+		{#if !gameStarted}
+			<div class="flex-1 flex flex-col items-center justify-center gap-6 overflow-auto">
+				<h1 class="text-4xl text-white mb-8">힘내라! 연산 하자</h1>
+
+				{#if !difficultySelected}
+					<h2 class="text-2xl text-white mb-4">난이도 선택</h2>
 					<button
 						onclick={() => {
-							difficulty = 'basic';
-							difficultySelected = true;
+							console.log('테스트 버튼 클릭');
+							alert('테스트 버튼 클릭됨');
 						}}
 						class="px-6 py-3 bg-blue-500 text-white rounded-lg text-xl hover:bg-blue-600"
 					>
-						기본 (올림 없음)
+						테스트
 					</button>
-					<button
-						onclick={() => {
-							difficulty = 'advanced';
-							difficultySelected = true;
-						}}
-						class="px-6 py-3 bg-green-500 text-white rounded-lg text-xl hover:bg-green-600"
-					>
-						심화 (올림 포함)
-					</button>
-				</div>
-			{:else}
-				<h2 class="text-2xl text-white mb-4">캐릭터 선택</h2>
-				<div class="flex gap-4 mb-6">
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata1'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'avata1')}
-					>
-						<img
-							src={AVATAR_IMAGES.avata1}
-							alt="Avatar 1"
-							class="w-14 h-14 object-cover rounded-lg"
-						/>
-					</button>
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata2'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'avata2')}
-					>
-						<img
-							src={AVATAR_IMAGES.avata2}
-							alt="Avatar 2"
-							class="w-14 h-14 object-cover rounded-lg"
-						/>
-					</button>
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata3'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'avata3')}
-					>
-						<img
-							src={AVATAR_IMAGES.avata3}
-							alt="Avatar 3"
-							class="w-14 h-14 object-cover rounded-lg"
-						/>
-					</button>
-					<button
-						class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'custom'
-							? 'ring-2 ring-yellow-400'
-							: ''}"
-						onclick={() => (selectedCharacter = 'custom')}
-					>
-						<label class="cursor-pointer">
-							{#if customCharacterImage}
-								<img
-									src={customCharacterImage}
-									alt="Custom"
-									class="w-12 h-12 object-cover rounded-lg"
-								/>
-							{:else}
-								<div
-									class="w-12 h-12 bg-gray-500 flex items-center justify-center text-white rounded-lg"
-								>
-									+
-								</div>
-							{/if}
-							<input type="file" accept="image/*" class="hidden" onchange={handleImageUpload} />
-						</label>
-					</button>
-				</div>
-				<h2 class="text-2xl text-white mb-4">연산 선택</h2>
-				<div class="flex flex-col items-center gap-4">
-					<!-- 100미만 제한 체크박스 -->
-					<label class="flex items-center gap-2 text-white text-lg">
-						<input type="checkbox" bind:checked={limitUnder100} class="w-4 h-4" />
-						<span>100미만으로 제한</span>
-					</label>
-
-					<!-- 기존 버튼들 -->
 					<div class="flex gap-4">
 						<button
 							onclick={() => {
-								operationType = 'addition';
-								gameStarted = true;
+								console.log('기본 난이도 선택');
+								difficulty = 'basic';
+								difficultySelected = true;
 							}}
 							class="px-6 py-3 bg-blue-500 text-white rounded-lg text-xl hover:bg-blue-600"
 						>
-							덧셈만
+							기본 (올림 없음)
 						</button>
 						<button
 							onclick={() => {
-								operationType = 'subtraction';
-								gameStarted = true;
+								console.log('심화 난이도 선택');
+								difficulty = 'advanced';
+								difficultySelected = true;
 							}}
 							class="px-6 py-3 bg-green-500 text-white rounded-lg text-xl hover:bg-green-600"
 						>
-							뺄셈만
+							심화 (올림 포함)
+						</button>
+					</div>
+				{:else}
+					<h2 class="text-2xl text-white mb-4">캐릭터 선택</h2>
+					<div class="flex gap-4 mb-6">
+						<button
+							class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata1'
+								? 'ring-2 ring-yellow-400'
+								: ''}"
+							onclick={() => {
+								selectedCharacter = 'avata1';
+							}}
+						>
+							<img
+								src={AVATAR_IMAGES.avata1}
+								alt="Avatar 1"
+								class="w-14 h-14 object-cover rounded-lg"
+							/>
 						</button>
 						<button
+							class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata2'
+								? 'ring-2 ring-yellow-400'
+								: ''}"
 							onclick={() => {
-								operationType = 'both';
-								gameStarted = true;
+								selectedCharacter = 'avata2';
 							}}
-							class="px-6 py-3 bg-purple-500 text-white rounded-lg text-xl hover:bg-purple-600"
 						>
-							모두
+							<img
+								src={AVATAR_IMAGES.avata2}
+								alt="Avatar 2"
+								class="w-14 h-14 object-cover rounded-lg"
+							/>
+						</button>
+						<button
+							class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'avata3'
+								? 'ring-2 ring-yellow-400'
+								: ''}"
+							onclick={() => {
+								selectedCharacter = 'avata3';
+							}}
+						>
+							<img
+								src={AVATAR_IMAGES.avata3}
+								alt="Avatar 3"
+								class="w-14 h-14 object-cover rounded-lg"
+							/>
+						</button>
+						<button
+							class="p-4 bg-gray-700 rounded-lg {selectedCharacter === 'custom'
+								? 'ring-2 ring-yellow-400'
+								: ''}"
+							onclick={() => {
+								selectedCharacter = 'custom';
+							}}
+						>
+							<label class="cursor-pointer">
+								{#if customCharacterImage}
+									<img
+										src={customCharacterImage}
+										alt="Custom"
+										class="w-12 h-12 object-cover rounded-lg"
+									/>
+								{:else}
+									<div
+										class="w-12 h-12 bg-gray-500 flex items-center justify-center text-white rounded-lg"
+									>
+										+
+									</div>
+								{/if}
+								<input type="file" accept="image/*" class="hidden" onchange={handleImageUpload} />
+							</label>
 						</button>
 					</div>
-				</div>
-				<button
-					onclick={() => {
-						difficultySelected = false;
-						difficulty = null;
-					}}
-					class="mt-4 px-4 py-2 bg-gray-500 text-white rounded-lg text-sm hover:bg-gray-600"
-				>
-					난이도 다시 선택
-				</button>
-			{/if}
-		</div>
-	{:else}
-		<div class="flex-none h-[20vh] flex items-center justify-center">
-			<div class="text-center">
-				<div class="text-2xl text-white mb-2">
-					문제 {problemIndex + 1}/10
-				</div>
-				<div class="text-3xl text-yellow-400">
-					{currentProblem.question}
-				</div>
-			</div>
-		</div>
+					<h2 class="text-2xl text-white mb-4">연산 선택</h2>
+					<div class="flex flex-col items-center gap-4">
+						<!-- 100미만 제한 체크박스 -->
+						<label class="flex items-center gap-2 text-white text-lg">
+							<input type="checkbox" bind:checked={limitUnder100} class="w-4 h-4" />
+							<span>100미만으로 제한</span>
+						</label>
 
-		<div class="flex-1 relative">
-			{#each fallingNumbers as num (num.id)}
-				<div
-					class="absolute"
-					style="left: {num.x}%; top: {num.y}%; transform: translate(-50%, -50%);"
-				>
-					<!-- 원형 스타일: 그라데이션, 그림자 효과 -->
-					<div
-						class="w-10 h-10 bg-gradient-to-br from-gray-700 to-gray-900 text-white flex items-center justify-center rounded-full shadow-lg"
-					>
-						{num.value}
+						<!-- 기존 버튼들 -->
+						<div class="flex gap-4">
+							<button
+								onclick={() => {
+									operationType = 'addition';
+									gameStarted = true;
+								}}
+								class="px-6 py-3 bg-blue-500 text-white rounded-lg text-xl hover:bg-blue-600"
+							>
+								덧셈만
+							</button>
+							<button
+								onclick={() => {
+									operationType = 'subtraction';
+									gameStarted = true;
+								}}
+								class="px-6 py-3 bg-green-500 text-white rounded-lg text-xl hover:bg-green-600"
+							>
+								뺄셈만
+							</button>
+							<button
+								onclick={() => {
+									operationType = 'both';
+									gameStarted = true;
+								}}
+								class="px-6 py-3 bg-purple-500 text-white rounded-lg text-xl hover:bg-purple-600"
+							>
+								모두
+							</button>
+						</div>
 					</div>
-
-					{#if showHitbox}
-						<div
-							class="absolute w-[10px] h-[10px] border-2 border-red-500"
-							style="transform: translate(-50%, -50%)"
-						></div>
-					{/if}
+					<button
+						onclick={() => {
+							difficultySelected = false;
+							difficulty = null;
+						}}
+						class="mt-4 px-4 py-2 bg-gray-500 text-white rounded-lg text-sm hover:bg-gray-600"
+					>
+						난이도 다시 선택
+					</button>
+				{/if}
+			</div>
+		{:else}
+			<div class="flex-none h-[20vh] flex items-center justify-center">
+				<div class="text-center">
+					<div class="text-2xl text-white mb-2">
+						문제 {problemIndex + 1}/10
+					</div>
+					<div class="text-3xl text-yellow-400">
+						{currentProblem.question}
+					</div>
 				</div>
-			{/each}
-
-			<div
-				class="absolute bottom-4 w-20 h-20 cursor-grab"
-				style:left="{position}%"
-				style:transform="translateX(-50%)"
-				ontouchstart={handleTouchStart}
-				ontouchmove={handleTouchMove}
-				ontouchend={handleTouchEnd}
-			>
-				{#if selectedCharacter === 'custom' && customCharacterImage}
-					<img
-						src={customCharacterImage}
-						alt="Custom"
-						class="w-full h-full object-cover rounded-lg"
-					/>
-				{:else if selectedCharacter !== 'custom'}
-					<img
-						src={AVATAR_IMAGES[selectedCharacter]}
-						alt="Avatar"
-						class="w-full h-full object-cover rounded-lg"
-					/>
-				{/if}
 			</div>
 
-			{#if showHitbox}
-				<div
-					class="absolute border-2 border-blue-500"
-					style:left="{position}%"
-					style:bottom="4px"
-					style:width="{characterWidth}px"
-					style:height="{characterHeight}px"
-					style:transform="translateX(-50%)"
-				></div>
-			{/if}
-		</div>
+			<div class="flex-1 relative">
+				{#each fallingNumbers as num (num.id)}
+					<div
+						class="absolute"
+						style="left: {num.x}%; top: {num.y}%; transform: translate(-50%, -50%);"
+					>
+						<!-- 원형 스타일: 그라데이션, 그림자 효과 -->
+						<div
+							class="w-10 h-10 bg-gradient-to-br from-gray-700 to-gray-900 text-white flex items-center justify-center rounded-full shadow-lg"
+						>
+							{num.value}
+						</div>
 
-		{#if isMobile}
-			<!-- 모바일용 일시정지 버튼 -->
-			<button
-				class="fixed top-4 right-4 w-12 h-12 bg-gray-800 bg-opacity-50 rounded-full text-white flex items-center justify-center z-10"
-				onclick={() => (isPaused = !isPaused)}
-			>
-				{#if isPaused}
-					▶
-				{:else}
-					❚❚
-				{/if}
-			</button>
-
-			<div class="flex-none h-[20vh] flex justify-between items-center px-4">
-				<button
-					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
-					onpointerdown={() => handleDirectionButton('left')}
-					onpointerup={() => (velocity = 0)}
-					onpointerleave={() => (velocity = 0)}
-				>
-					←
-				</button>
-				<button
-					class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
-					onpointerdown={() => handleDirectionButton('right')}
-					onpointerup={() => (velocity = 0)}
-					onpointerleave={() => (velocity = 0)}
-				>
-					→
-				</button>
-			</div>
-		{/if}
-
-		{#if isPaused}
-			<div class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
-				<div class="text-4xl text-white font-bold text-center">
-					일시정지
-					<div class="text-xl mt-4">
-						{#if isMobile}
-							계속하려면 재생 버튼을 누르세요
-						{:else}
-							계속하려면 스페이스바를 누르세요
+						{#if showHitbox}
+							<div
+								class="absolute w-[10px] h-[10px] border-2 border-red-500"
+								style="transform: translate(-50%, -50%)"
+							></div>
 						{/if}
 					</div>
-				</div>
-			</div>
-		{/if}
+				{/each}
 
-		{#if gameCleared}
-			<div
-				class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
-			>
-				<div class="text-6xl mb-8 animate-bounce">🎉</div>
-				<h2 class="text-4xl mb-4 text-yellow-400">축하합니다!</h2>
-				<h3 class="text-2xl mb-6">모든 문제를 완료했습니다!</h3>
-
-				<div class="text-xl mb-8">
-					<p class="mb-4">문제 해결 시간</p>
-					{#each timeRecords as time, index}
-						<p class="mb-2">
-							문제 {index + 1}: <span class="text-green-400">{(time / 1000).toFixed(2)}초</span>
-						</p>
-					{/each}
-					<p class="mt-4 text-2xl">
-						평균 시간: <span class="text-yellow-400">
-							{(timeRecords.reduce((a, b) => a + b, 0) / timeRecords.length / 1000).toFixed(2)}초
-						</span>
-					</p>
-				</div>
-
-				<button
-					onclick={resetGame}
-					class="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg text-xl hover:from-blue-600 hover:to-purple-600 transition-all duration-300 shadow-lg hover:shadow-xl"
+				<div
+					class="absolute bottom-4 w-20 h-20 cursor-grab"
+					style:left="{position}%"
+					style:transform="translateX(-50%)"
+					ontouchstart={handleTouchStart}
+					ontouchmove={handleTouchMove}
+					ontouchend={handleTouchEnd}
 				>
-					처음으로 돌아가기
-				</button>
-			</div>
-		{/if}
-
-		{#if gameOver}
-			<div
-				class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
-			>
-				<h2 class="text-4xl mb-4">Game Over!</h2>
-				<p class="text-2xl mb-4">완료된 문제: {problemIndex}/10</p>
-				<div class="text-xl">
-					{#each timeRecords as time, index}
-						<p>
-							문제 {index + 1}: {(time / 1000).toFixed(2)}초
-						</p>
-					{/each}
+					{#if selectedCharacter === 'custom' && customCharacterImage}
+						<img
+							src={customCharacterImage}
+							alt="Custom"
+							class="w-full h-full object-cover rounded-lg"
+						/>
+					{:else if selectedCharacter !== 'custom'}
+						<img
+							src={AVATAR_IMAGES[selectedCharacter]}
+							alt="Avatar"
+							class="w-full h-full object-cover rounded-lg"
+						/>
+					{/if}
 				</div>
+
+				{#if showHitbox}
+					<div
+						class="absolute border-2 border-blue-500"
+						style:left="{position}%"
+						style:bottom="4px"
+						style:width="{characterWidth}px"
+						style:height="{characterHeight}px"
+						style:transform="translateX(-50%)"
+					></div>
+				{/if}
+			</div>
+
+			{#if isMobile}
+				<!-- 모바일용 일시정지 버튼 -->
 				<button
-					onclick={() => window.location.reload()}
-					class="mt-6 px-6 py-3 bg-blue-500 rounded-lg hover:bg-blue-600"
+					class="fixed top-4 right-4 w-12 h-12 bg-gray-800 bg-opacity-50 rounded-full text-white flex items-center justify-center z-10"
+					onclick={() => (isPaused = !isPaused)}
 				>
-					다시 시작
+					{#if isPaused}
+						▶
+					{:else}
+						❚❚
+					{/if}
 				</button>
-			</div>
-		{/if}
 
-		{#if isTransitioning}
-			<div class="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center">
-				<div class="text-4xl text-white text-center">
-					다음 문제 시작까지: {countdown}초
+				<div class="flex-none h-[20vh] flex justify-between items-center px-4">
+					<button
+						class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
+						onpointerdown={() => handleDirectionButton('left')}
+						onpointerup={() => (velocity = 0)}
+						onpointerleave={() => (velocity = 0)}
+					>
+						←
+					</button>
+					<button
+						class="w-20 h-20 bg-gray-800 bg-opacity-50 rounded-full text-white text-4xl flex items-center justify-center active:bg-opacity-75"
+						onpointerdown={() => handleDirectionButton('right')}
+						onpointerup={() => (velocity = 0)}
+						onpointerleave={() => (velocity = 0)}
+					>
+						→
+					</button>
 				</div>
-			</div>
+			{/if}
+
+			{#if isPaused}
+				<div class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50">
+					<div class="text-4xl text-white font-bold text-center">
+						일시정지
+						<div class="text-xl mt-4">
+							{#if isMobile}
+								계속하려면 재생 버튼을 누르세요
+							{:else}
+								계속하려면 스페이스바를 누르세요
+							{/if}
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			{#if gameCleared}
+				<div
+					class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
+				>
+					<div class="text-6xl mb-8 animate-bounce">🎉</div>
+					<h2 class="text-4xl mb-4 text-yellow-400">축하합니다!</h2>
+					<h3 class="text-2xl mb-6">모든 문제를 완료했습니다!</h3>
+
+					<div class="text-xl mb-8">
+						<p class="mb-4">문제 해결 시간</p>
+						{#each timeRecords as time, index}
+							<p class="mb-2">
+								문제 {index + 1}: <span class="text-green-400">{(time / 1000).toFixed(2)}초</span>
+							</p>
+						{/each}
+						<p class="mt-4 text-2xl">
+							평균 시간: <span class="text-yellow-400">
+								{(timeRecords.reduce((a, b) => a + b, 0) / timeRecords.length / 1000).toFixed(2)}초
+							</span>
+						</p>
+					</div>
+
+					<button
+						onclick={resetGame}
+						class="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg text-xl hover:from-blue-600 hover:to-purple-600 transition-all duration-300 shadow-lg hover:shadow-xl"
+					>
+						처음으로 돌아가기
+					</button>
+				</div>
+			{/if}
+
+			{#if gameOver}
+				<div
+					class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 text-white"
+				>
+					<h2 class="text-4xl mb-4">Game Over!</h2>
+					<p class="text-2xl mb-4">완료된 문제: {problemIndex}/10</p>
+					<div class="text-xl">
+						{#each timeRecords as time, index}
+							<p>
+								문제 {index + 1}: {(time / 1000).toFixed(2)}초
+							</p>
+						{/each}
+					</div>
+					<button
+						onclick={() => window.location.reload()}
+						class="mt-6 px-6 py-3 bg-blue-500 rounded-lg hover:bg-blue-600"
+					>
+						다시 시작
+					</button>
+				</div>
+			{/if}
+
+			{#if isTransitioning}
+				<div class="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center">
+					<div class="text-4xl text-white text-center">
+						다음 문제 시작까지: {countdown}초
+					</div>
+				</div>
+			{/if}
 		{/if}
-	{/if}
+	</div>
 </div>
 
 <style>
